@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ride Sharing Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <style>
+        body { 
+            padding: 20px; 
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        #map { 
+            height: 600px; 
+            width: 100%; 
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        h2 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .status { 
+            color: #666; 
+            margin-bottom: 15px;
+            padding: 10px;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+        }
+        .route-info {
+            display: flex;
+            background-color: #e9f7fe;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            border-left: 4px solid #3498db;
+        }
+        .info-item {
+            flex: 1;
+            text-align: center;
+        }
+        .info-item .value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2c3e50;
+            margin: 5px 0;
+        }
+        .info-item .label {
+            font-size: 14px;
+            color: #7f8c8d;
+            text-transform: uppercase;
+        }
+        .info-divider {
+            width: 1px;
+            background-color: #d9e6f2;
+            margin: 0 20px;
+        }
+        .waypoints {
+            margin-bottom: 20px;
+        }
+        .waypoint-card {
+            background-color: #f5f5f5;
+            padding: 10px 15px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+        }
+        .waypoint-number {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background-color: #3498db;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 12px;
+            flex-shrink: 0;
+        }
+        .waypoint-type {
+            background-color: #e0e0e0;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            text-transform: uppercase;
+            margin-right: 12px;
+            flex-shrink: 0;
+        }
+        .waypoint-type.source {
+            background-color: #2ecc71;
+            color: white;
+        }
+        .waypoint-type.destination {
+            background-color: #e74c3c;
+            color: white;
+        }
+        .waypoint-type.via {
+            background-color: #f39c12;
+            color: white;
+        }
+        .waypoint-details {
+            flex-grow: 1;
+        }
+        .waypoint-details h3 {
+            margin: 0 0 5px 0;
+            font-size: 16px;
+        }
+        .waypoint-details p {
+            margin: 0;
+            color: #666;
+            font-size: 14px;
+        }
+        .ride-share-info {
+            background-color: #f0f8ff;
+            border-left: 4px solid #00a0e4;
+            padding: 12px 15px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+        }
+        .ride-share-info h3 {
+            margin-top: 0;
+            margin-bottom: 8px;
+            color: #00a0e4;
+        }
+        .ride-share-info p {
+            margin: 0 0 8px 0;
+            color: #444;
+        }
+    </style>
+</head>
+<body>
+    <h2>Ride Sharing Map</h2>
+    
+    <div class="ride-share-info">
+        <h3>🚗 Ride Sharing Active</h3>
+        <p>This route includes multiple stops for ride sharing between passengers.</p>
+    </div>
+    
+    <div class="route-info" id="route-info">
+        <div class="info-item">
+            <div class="value" id="distance-value">-</div>
+            <div class="label">Total Distance</div>
+        </div>
+        <div class="info-divider"></div>
+        <div class="info-item">
+            <div class="value" id="time-value">-</div>
+            <div class="label">Est. Travel Time</div>
+        </div>
+        <div class="info-divider"></div>
+        <div class="info-item">
+            <div class="value" id="stops-value">-</div>
+            <div class="label">Stops</div>
+        </div>
+    </div>
+    
+    <h3>Ride Stops</h3>
+    <div class="waypoints" id="waypoints-container">
+        <!-- Waypoints will be added here -->
+        <div class="status">Loading waypoints...</div>
+    </div>
+    
+    <div class="status" id="status">Loading route data...</div>
+    <div id="map"></div>
+
+    <script>
+        // Initialize the map (will update view later)
+        var map = L.map('map');
+        var statusElement = document.getElementById('status');
+        var waypointsContainer = document.getElementById('waypoints-container');
+        
+        // Elements for route info display
+        var distanceValueEl = document.getElementById('distance-value');
+        var timeValueEl = document.getElementById('time-value');
+        var stopsValueEl = document.getElementById('stops-value');
+
+        // Add OpenStreetMap tiles
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        // Define default coordinates in case location data isn't available
+        var defaultSourceCoords = [18.760290, 73.381424];
+        var defaultDestCoords = [18.733542, 73.445879];
+        var routeMarkers = [];
+        
+        // Custom marker icons for different waypoint types
+        var createMarkerIcon = function(type) {
+            let color;
+            switch(type) {
+                case 'source':
+                    color = '#2ecc71'; break;
+                case 'destination':
+                    color = '#e74c3c'; break;
+                case 'via':
+                    color = '#f39c12'; break;
+                default:
+                    color = '#3498db';
+            }
+            
+            return L.divIcon({
+                className: 'custom-div-icon',
+                html: `<div style="background-color:${color}; width:24px; height:24px; border-radius:50%; border:2px solid white; display:flex; align-items:center; justify-content:center; color:white; font-weight:bold; font-size:12px;"></div>`,
+                iconSize: [30, 30],
+                iconAnchor: [15, 15]
+            });
+        };
+        
+        // Define waypoint type labels
+        const typeLabels = {
+            'source': 'Pickup',
+            'destination': 'Dropoff',
+            'via': 'Stop'
+        };
+        
+        // Create waypoint card HTML
+        function createWaypointCard(waypoint, index) {
+            const type = waypoint.type || 'via';
+            return `
+                <div class="waypoint-card">
+                    <div class="waypoint-number">${index}</div>
+                    <div class="waypoint-type ${type}">${typeLabels[type] || 'Stop'}</div>
+                    <div class="waypoint-details">
+                        <h3>${waypoint.address}</h3>
+                        <p>Coordinates: ${waypoint.coordinates[0]}, ${waypoint.coordinates[1]}</p>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Try to load location data first
+        fetch('locations.json')
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Location data not found. Using default coordinates.');
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Update route info if available
+                if (data.route_info) {
+                    distanceValueEl.textContent = data.route_info.distance_text;
+                    timeValueEl.textContent = data.route_info.time_text;
+                    
+                    // Get total number of stops
+                    const totalStops = (data.via_points ? data.via_points.length : 0) + 2; // include source and destination
+                    stopsValueEl.textContent = totalStops;
+                }
+                
+                // Update waypoints display
+                if (data.waypoints && data.waypoints.length > 0) {
+                    // Clear the loading message
+                    waypointsContainer.innerHTML = '';
+                    
+                    // Add each waypoint card
+                    data.waypoints.forEach((waypoint, index) => {
+                        const waypointHTML = createWaypointCard(waypoint, index + 1);
+                        waypointsContainer.innerHTML += waypointHTML;
+                    });
+                } else if (data.source && data.destination) {
+                    // If no waypoints are defined but we have source and destination
+                    waypointsContainer.innerHTML = '';
+                    
+                    // Create source and destination cards
+                    const sourceHTML = createWaypointCard({
+                        type: 'source',
+                        address: data.source.address,
+                        coordinates: data.source.coordinates
+                    }, 1);
+                    
+                    const destHTML = createWaypointCard({
+                        type: 'destination',
+                        address: data.destination.address,
+                        coordinates: data
+.destination.coordinates
+                    }, 2);
+                    
+                    waypointsContainer.innerHTML = sourceHTML + destHTML;
+                }
+                
+                // Use the fetched coordinates
+                defaultSourceCoords = data.source.coordinates;
+                defaultDestCoords = data.destination.coordinates;
+                
+                // Add markers for source and destination
+                var sourceMarker = L.marker(defaultSourceCoords, { 
+                    icon: createMarkerIcon('source')
+                }).addTo(map).bindPopup(`<strong>Source:</strong><br>${data.source.address}`);
+                
+                var destMarker = L.marker(defaultDestCoords, {
+                    icon: createMarkerIcon('destination')
+                }).addTo(map).bindPopup(`<strong>Destination:</strong><br>${data.destination.address}`);
+                
+                routeMarkers = [sourceMarker, destMarker];
+                
+                // Add markers for via points if any
+                if (data.via_points && data.via_points.length > 0) {
+                    data.via_points.forEach((via, index) => {
+                        var viaMarker = L.marker(via.coordinates, {
+                            icon: createMarkerIcon('via')
+                        }).addTo(map).bindPopup(`<strong>Via Point ${index+1}:</strong><br>${via.address}`);
+                        routeMarkers.push(viaMarker);
+                    });
+                }
+                
+                // Create a fallback line between all points and fit map
+                let fallbackPoints = [defaultSourceCoords];
+                
+                // Add via points to the fallback line
+                if (data.via_points && data.via_points.length > 0) {
+                    data.via_points.forEach(via => {
+                        fallbackPoints.push(via.coordinates);
+                    });
+                }
+                
+                fallbackPoints.push(defaultDestCoords);
+                
+                var fallbackLine = L.polyline(fallbackPoints, 
+                    { color: 'red', weight: 3, dashArray: '5,10' }).addTo(map);
+                
+                map.fitBounds(fallbackLine.getBounds());
+                
+                return fallbackLine; // Pass to next then clause
+            })
+            .catch(error => {
+                console.warn("Location data issue:", error);
+                
+                // Use default coordinates
+                var sourceMarker = L.marker(defaultSourceCoords).addTo(map)
+                    .bindPopup("Source");
+                var destMarker = L.marker(defaultDestCoords).addTo(map)
+                    .bindPopup("Destination");
+                
+                routeMarkers = [sourceMarker, destMarker];
+                
+                // Create a fallback line and fit map
+                var fallbackLine = L.polyline([defaultSourceCoords, defaultDestCoords], 
+                    { color: 'red', weight: 3, dashArray: '5,10' }).addTo(map);
+                
+                map.fitBounds([defaultSourceCoords, defaultDestCoords]);
+                
+                return fallbackLine;
+            })
+            .then(fallbackLine => {
+                // Now load route data
+                return fetch('route.json')
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('Route data not found. Make sure to run the Python script first.');
+                        }
+                        return response.json();
+                    })
+                    .then(route => {
+                        if (route.length === 0) {
+                            throw new Error("Empty route data found.");
+                        }
+
+                        statusElement.textContent = "✅ Route loaded successfully!";
+                        statusElement.style.color = "green";
+                        
+                        // Remove the fallback line
+                        map.removeLayer(fallbackLine);
+                        
+                        // Draw the detailed route on the map
+                        var routeLine = L.polyline(route, { color: 'blue', weight: 5 }).addTo(map);
+
+                        // Keep the waypoint markers - don't remove them
+                        
+                        // Fit the map to show the whole route
+                        map.fitBounds(routeLine.getBounds());
+                        
+                        return route;
+                    });
+            })
+            .catch(error => {
+                console.error("Error loading data:", error);
+                statusElement.textContent = "⚠️ " + error.message;
+                statusElement.style.color = "red";
+                
+                // Make sure the map is centered if nothing else worked
+                if (!map.getBounds().isValid()) {
+                    map.setView(defaultSourceCoords, 13);
+                }
+            });
+    </script>
+</body>
+</html>
